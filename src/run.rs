@@ -28,11 +28,7 @@ pub async fn run(ssh_key: &str, release: bool, nextest_args: &[String]) -> Resul
     let n = peers.len();
     info!("Found {n} peer(s): {}", peers.iter().map(|p| p.hostname.as_str()).collect::<Vec<_>>().join(", "));
 
-    // 2. Build nextest archive + source tarball
-    info!("Building nextest archive...");
-    let archive_path = build_archive(release).await?;
-    info!("Archive created at {}", archive_path.display());
-
+    // 2. Create source tarball
     info!("Creating source tarball...");
     let source_tar_path = create_source_tarball().await?;
     info!("Source tarball created at {}", source_tar_path.display());
@@ -41,7 +37,7 @@ pub async fn run(ssh_key: &str, release: bool, nextest_args: &[String]) -> Resul
     info!("Distributing to {n} peer(s)...");
     let sessions = connect_all(&peers, &ssh_key_path).await?;
 
-    distribute_all(&sessions, &peers, &archive_path, &source_tar_path).await?;
+    distribute_all(&sessions, &peers, &source_tar_path).await?;
     info!("Files distributed to all peers");
 
     // 4. Execute tests on all peers in parallel, streaming output
@@ -54,15 +50,15 @@ pub async fn run(ssh_key: &str, release: bool, nextest_args: &[String]) -> Resul
         format!(" {}", nextest_args.join(" "))
     };
 
+    let release_flag = if release { " --cargo-profile release" } else { "" };
+
     let mut handles = Vec::new();
     for (i, (session, peer)) in sessions.into_iter().zip(peers.iter()).enumerate() {
         let partition_id = i + 1;
         let hostname = peer.hostname.clone();
         let cmd = format!(
             "cd {REMOTE_WORK_DIR}/src && cargo nextest run \
-             --archive-file {REMOTE_WORK_DIR}/archive.tar.zst \
-             --workspace-remap {REMOTE_WORK_DIR}/src \
-             --partition hash:{partition_id}/{n}{extra_args}"
+             --partition hash:{partition_id}/{n}{release_flag}{extra_args}"
         );
 
         handles.push(tokio::spawn(async move {
@@ -111,39 +107,9 @@ pub async fn run(ssh_key: &str, release: bool, nextest_args: &[String]) -> Resul
     }
 
     // Clean up local temp files
-    let _ = tokio::fs::remove_file(&archive_path).await;
     let _ = tokio::fs::remove_file(&source_tar_path).await;
 
     Ok(())
-}
-
-/// Build a nextest archive in a temp directory.
-async fn build_archive(release: bool) -> Result<PathBuf> {
-    let archive_path = std::env::temp_dir().join("partest-archive.tar.zst");
-    let archive_str = archive_path.to_string_lossy().to_string();
-
-    let mut args = vec!["nextest", "archive", "--archive-file", &archive_str];
-    if release {
-        args.push("--cargo-profile");
-        args.push("release");
-    }
-
-    let output = tokio::process::Command::new("cargo")
-        .args(&args)
-        .stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit())
-        .output()
-        .await
-        .context("failed to run `cargo nextest archive`")?;
-
-    if !output.status.success() {
-        anyhow::bail!(
-            "`cargo nextest archive` failed with status {}",
-            output.status
-        );
-    }
-
-    Ok(archive_path)
 }
 
 /// Connect to all peers via SSH in parallel.
@@ -200,21 +166,14 @@ async fn create_source_tarball() -> Result<PathBuf> {
     Ok(tar_path)
 }
 
-/// Upload the archive and source to all peers, then extract source.
+/// Upload source to all peers and extract it.
 async fn distribute_all(
     sessions: &[Session],
     peers: &[Peer],
-    archive_path: &Path,
     source_tar_path: &Path,
 ) -> Result<()> {
     for (session, peer) in sessions.iter().zip(peers) {
         let name = &peer.hostname;
-
-        // Upload nextest archive
-        session
-            .upload(archive_path, &format!("{REMOTE_WORK_DIR}/archive.tar.zst"))
-            .await
-            .with_context(|| format!("failed to upload archive to {name}"))?;
 
         // Upload source tarball
         session

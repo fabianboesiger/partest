@@ -18,10 +18,6 @@ pub enum Command {
 
     /// Run tests distributed across all discovered peers
     Run {
-        /// SSH username for connecting to peers
-        #[arg(long, env = "USER")]
-        ssh_user: String,
-
         /// Path to SSH private key
         #[arg(long, default_value_t = default_ssh_key())]
         ssh_key: String,

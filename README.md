@@ -122,7 +122,6 @@ Options:
 
 ```
 --release              Build and run tests in release mode
---ssh-user <USER>      SSH username (defaults to $USER)
 --ssh-key <PATH>       SSH private key path (defaults to ~/.ssh/id_ed25519)
 ```
 

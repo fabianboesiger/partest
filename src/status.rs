@@ -14,11 +14,11 @@ pub fn show_status() -> Result<()> {
         return Ok(());
     }
 
-    println!("{:<20} {:<20} {:<6}", "HOSTNAME", "IP", "SSH PORT");
-    println!("{}", "─".repeat(48));
+    println!("{:<20} {:<20} {:<10} {:<6}", "HOSTNAME", "IP", "SSH USER", "SSH PORT");
+    println!("{}", "─".repeat(58));
 
     for peer in &peers {
-        println!("{:<20} {:<20} {:<6}", peer.hostname, peer.ip, peer.ssh_port);
+        println!("{:<20} {:<20} {:<10} {:<6}", peer.hostname, peer.ip, peer.ssh_user, peer.ssh_port);
     }
 
     println!("\n{} peer(s) found.", peers.len());

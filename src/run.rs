@@ -9,7 +9,7 @@ const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(3);
 const REMOTE_WORK_DIR: &str = "~/.partest-work";
 
 /// Run the full distributed test pipeline.
-pub async fn run(ssh_user: &str, ssh_key: &str, release: bool, nextest_args: &[String]) -> Result<()> {
+pub async fn run(ssh_key: &str, release: bool, nextest_args: &[String]) -> Result<()> {
     let ssh_key_path = PathBuf::from(shellexpand::tilde(ssh_key).as_ref());
 
     // 1. Discover peers
@@ -39,7 +39,7 @@ pub async fn run(ssh_user: &str, ssh_key: &str, release: bool, nextest_args: &[S
 
     // 3. Connect to all peers and distribute
     info!("Distributing to {n} peer(s)...");
-    let sessions = connect_all(&peers, ssh_user, &ssh_key_path).await?;
+    let sessions = connect_all(&peers, &ssh_key_path).await?;
 
     distribute_all(&sessions, &peers, &archive_path, &source_tar_path).await?;
     info!("Files distributed to all peers");
@@ -147,7 +147,6 @@ async fn build_archive(release: bool) -> Result<PathBuf> {
 /// Connect to all peers via SSH in parallel.
 async fn connect_all(
     peers: &[Peer],
-    user: &str,
     key_path: &Path,
 ) -> Result<Vec<Session>> {
     let mut handles = Vec::new();
@@ -155,7 +154,7 @@ async fn connect_all(
     for peer in peers {
         let ip = peer.ip;
         let port = peer.ssh_port;
-        let user = user.to_string();
+        let user = peer.ssh_user.clone();
         let key_path = key_path.to_path_buf();
 
         handles.push(tokio::spawn(async move {

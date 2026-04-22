@@ -12,6 +12,7 @@ pub struct Peer {
     pub hostname: String,
     pub ip: IpAddr,
     pub ssh_port: u16,
+    pub ssh_user: String,
 }
 
 impl std::fmt::Display for Peer {
@@ -48,11 +49,17 @@ pub fn discover_peers(timeout: Duration) -> Result<Vec<Peer>> {
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(22);
 
+                let ssh_user = info
+                    .get_property_val_str("ssh_user")
+                    .unwrap_or("root")
+                    .to_string();
+
                 if let Some(&ip) = info.get_addresses().iter().next() {
                     peers.push(Peer {
                         hostname,
                         ip,
                         ssh_port,
+                        ssh_user,
                     });
                 } else {
                     eprintln!("warning: peer {hostname} resolved but has no addresses, skipping");

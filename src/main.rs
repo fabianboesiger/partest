@@ -23,12 +23,11 @@ async fn main() -> Result<()> {
             daemon::run_daemon(ssh_port).await?;
         }
         Command::Run {
-            ssh_user,
             ssh_key,
             release,
             nextest_args,
         } => {
-            run::run(&ssh_user, &ssh_key, release, &nextest_args).await?;
+            run::run(&ssh_key, release, &nextest_args).await?;
         }
         Command::Status => {
             status::show_status()?;
@@ -38,5 +37,15 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn example_test() {}
+mod tests {
+    #[test]
+    fn example_test1() {}
+    #[test]
+    fn example_test2() {}
+    #[test]
+    fn example_test3() {}
+    #[test]
+    fn example_test4() {}
+    #[test]
+    fn example_test5() {}
+}

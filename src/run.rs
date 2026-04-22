@@ -130,8 +130,8 @@ fn shell_escape(s: &str) -> String {
 pub async fn run(
     ssh_key: &str,
     release: bool,
-    batch_size: usize,
-    jobs_per_worker: usize,
+    batch_size_override: Option<usize>,
+    jobs_per_worker_override: Option<usize>,
     cargo_test_args: &[String],
 ) -> Result<()> {
     let ssh_key_path = PathBuf::from(shellexpand::tilde(ssh_key).as_ref());
@@ -143,7 +143,6 @@ pub async fn run(
         anyhow::bail!("No tests found by `cargo test -- --list`");
     }
     let total_tests = tests.len();
-    info!("Found {total_tests} test(s), max batch size {batch_size}");
 
     // 2. Discover peers
     info!("Discovering peers on the local network...");
@@ -174,7 +173,24 @@ pub async fn run(
     distribute_all(&sessions, &peers, &source_tar_path).await?;
     info!("Files distributed to all peers");
 
-    // 5. Set up MultiProgress TUI
+    // 5. Detect CPU count on workers (use minimum across all peers)
+    let min_cpus = detect_min_cpus(&sessions, &peers).await?;
+    info!("Detected {min_cpus} CPU(s) (minimum across workers)");
+
+    // Compute auto-tuned parameters from CPU count:
+    //   jobs_per_worker = cpus / 2  (overlap overhead without oversubscription)
+    //   test_threads    = cpus / jobs  (partition CPUs across concurrent slots)
+    //   batch_size      = 4  (fine-grained work distribution)
+    let jobs_per_worker = jobs_per_worker_override.unwrap_or_else(|| (min_cpus / 2).max(2));
+    let test_threads = min_cpus / jobs_per_worker;
+    let batch_size = batch_size_override.unwrap_or(4);
+
+    info!(
+        "Found {total_tests} test(s) — batch_size={batch_size}, \
+         jobs_per_worker={jobs_per_worker}, test_threads={test_threads}"
+    );
+
+    // 6. Set up MultiProgress TUI
     let multi = MultiProgress::new();
 
     // Total progress bar at the top
@@ -202,7 +218,7 @@ pub async fn run(
         })
         .collect();
 
-    // 6. Pre-build on all workers
+    // 7. Pre-build on all workers
     let release_flag = if release { " --release" } else { "" };
 
     {
@@ -242,7 +258,7 @@ pub async fn run(
         }
     }
 
-    // 7. Adaptive work-stealing dispatch with concurrent slots per worker
+    // 8. Adaptive work-stealing dispatch with concurrent slots per worker
     let pool = Arc::new(TestPool::new(tests, batch_size, n * jobs_per_worker));
     let release_arg = if release { " --release" } else { "" };
     let extra_args = if cargo_test_args.is_empty() {
@@ -306,7 +322,7 @@ pub async fn run(
                 slot_handles.push(tokio::spawn(async move {
                     let exact_args = build_exact_args(&batch_tests);
                     let cmd = format!(
-                        "cd {REMOTE_WORK_DIR}/src && cargo test{release_arg}{extra_args} -- {exact_args}"
+                        "cd {REMOTE_WORK_DIR}/src && cargo test{release_arg}{extra_args} -- --test-threads {test_threads} {exact_args}"
                     );
 
                     let mut output_buf = String::new();
@@ -368,7 +384,7 @@ pub async fn run(
     let total_elapsed = start.elapsed();
     total_bar.finish();
 
-    // 8. Summary
+    // 9. Summary
     println!();
     println!("─── Summary ───");
 
@@ -430,7 +446,42 @@ pub async fn run(
     Ok(())
 }
 
-// ── Helpers (unchanged) ──────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────
+
+/// Detect CPU count on each worker via SSH, return the minimum.
+async fn detect_min_cpus(sessions: &[Arc<Session>], peers: &[Peer]) -> Result<usize> {
+    let mut handles = Vec::new();
+    for (session, peer) in sessions.iter().zip(peers) {
+        let session = session.clone();
+        let hostname = peer.hostname.clone();
+        handles.push(async move {
+            let mut output = String::new();
+            // sysctl works on macOS, nproc on Linux; try both
+            let exit = session
+                .exec_stream(
+                    "nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null",
+                    |line| {
+                        output.push_str(line);
+                    },
+                )
+                .await;
+            match exit {
+                Ok(0) => {
+                    let cpus: usize = output.trim().parse().unwrap_or(4);
+                    Ok(cpus)
+                }
+                _ => {
+                    info!("Could not detect CPUs on {hostname}, assuming 4");
+                    Ok(4usize)
+                }
+            }
+        });
+    }
+
+    let results = futures::future::join_all(handles).await;
+    let min = results.into_iter().collect::<Result<Vec<_>>>()?.into_iter().min().unwrap_or(4);
+    Ok(min)
+}
 
 /// Connect to all peers via SSH in parallel.
 async fn connect_all(peers: &[Peer], key_path: &Path) -> Result<Vec<Session>> {

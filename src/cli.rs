@@ -26,13 +26,13 @@ pub enum Command {
         #[arg(long)]
         release: bool,
 
-        /// Number of tests per batch dispatched to each worker
-        #[arg(long, default_value_t = 32)]
-        batch_size: usize,
+        /// Number of tests per batch dispatched to each worker slot (default: auto)
+        #[arg(long)]
+        batch_size: Option<usize>,
 
-        /// Concurrent batch slots per worker (overlaps startup overhead)
-        #[arg(long, default_value_t = 16)]
-        jobs_per_worker: usize,
+        /// Concurrent batch slots per worker (default: auto from worker CPU count)
+        #[arg(long)]
+        jobs_per_worker: Option<usize>,
 
         /// Extra arguments forwarded to `cargo test`
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]

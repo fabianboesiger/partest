@@ -82,7 +82,17 @@ ssh localhost
 
 Workers only need to run `partest daemon` and accept SSH connections from coordinators. They do **not** need to generate their own SSH key.
 
-#### 1. Add coordinator public keys to authorized_keys
+#### Quick setup (macOS)
+
+Run this single command to install everything and start the daemon as a background service:
+
+```bash
+bash <(curl -sSf https://raw.githubusercontent.com/fabianboesiger/partest/main/setup-worker-macos.sh)
+```
+
+#### Manual setup
+
+##### 1. Add coordinator public keys to authorized_keys
 
 Get the public key (`~/.ssh/id_ed25519.pub`) from each coordinator and add it:
 

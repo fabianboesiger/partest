@@ -143,6 +143,17 @@ pub async fn run(
 
     // 5. Set up MultiProgress TUI
     let multi = MultiProgress::new();
+
+    // Total progress bar at the top
+    let total_bar = multi.add(ProgressBar::new(total_tests as u64));
+    total_bar.set_style(
+        ProgressStyle::with_template(
+            "{bar:40.green/dim} {pos}/{len} tests ({percent}%) — {elapsed_precise} elapsed"
+        )
+        .unwrap()
+        .progress_chars("█▉▊▋▌▍▎▏ "),
+    );
+
     let spinner_style = ProgressStyle::with_template("{spinner:.cyan} {wide_msg}")
         .unwrap()
         .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏");
@@ -150,7 +161,7 @@ pub async fn run(
     let bars: Vec<ProgressBar> = peers
         .iter()
         .map(|peer| {
-            let pb = multi.add(ProgressBar::new_spinner());
+            let pb = multi.insert_after(&total_bar, ProgressBar::new_spinner());
             pb.set_style(spinner_style.clone());
             pb.set_message(format!("{}  — connecting", peer.hostname));
             pb.enable_steady_tick(Duration::from_millis(100));
@@ -214,6 +225,7 @@ pub async fn run(
         let hostname = peer.hostname.clone();
         let pb = bars[i].clone();
         let queue = Arc::clone(&queue);
+        let total_bar = total_bar.clone();
         let extra_args = extra_args.clone();
         let nextest_profile = nextest_profile.to_string();
         let session = &sessions[i];
@@ -263,6 +275,7 @@ pub async fn run(
 
                 let elapsed = batch_start.elapsed();
                 batches_run += 1;
+                total_bar.inc(batch.tests.len() as u64);
 
                 results.push(BatchResult {
                     batch_index: batch.index,
@@ -278,6 +291,7 @@ pub async fn run(
 
     let worker_results = futures::future::join_all(dispatch_handles).await;
     let total_elapsed = start.elapsed();
+    total_bar.finish();
 
     // 8. Summary
     println!();

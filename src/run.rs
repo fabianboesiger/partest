@@ -181,12 +181,12 @@ async fn distribute_all(
             .await
             .with_context(|| format!("failed to upload source to {name}"))?;
 
-        // Clean old source, extract fresh
+        // Extract fresh source, preserving target/ for incremental compilation
         session
             .exec_ignore(&format!(
-                "rm -rf {REMOTE_WORK_DIR}/src && \
-                 mkdir -p {REMOTE_WORK_DIR}/src && \
+                "mkdir -p {REMOTE_WORK_DIR}/src && \
                  cd {REMOTE_WORK_DIR}/src && \
+                 find . -mindepth 1 -maxdepth 1 ! -name target -exec rm -rf {{}} + && \
                  tar xzf {REMOTE_WORK_DIR}/source.tar.gz"
             ))
             .await

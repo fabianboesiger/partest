@@ -2,7 +2,6 @@ use crate::discovery::{self, Peer};
 use crate::ssh::Session;
 use anyhow::{Context, Result};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use serde::Deserialize;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -71,54 +70,58 @@ struct BatchResult {
     output: String,
 }
 
-// ── Nextest JSON list parsing ────────────────────────────────────────
+// ── Test list parsing ────────────────────────────────────────────────
 
-#[derive(Deserialize)]
-struct NextestListOutput {
-    #[serde(rename = "rust-suites")]
-    rust_suites: std::collections::HashMap<String, NextestSuite>,
-}
+/// List all tests locally via `cargo test -- --list`.
+async fn list_tests_locally(release: bool) -> Result<Vec<String>> {
+    let mut args = vec!["test"];
+    if release {
+        args.push("--release");
+    }
+    args.extend(["--", "--list"]);
 
-#[derive(Deserialize)]
-struct NextestSuite {
-    testcases: std::collections::HashMap<String, serde_json::Value>,
-}
-
-/// List all tests locally via `cargo nextest list`.
-async fn list_tests_locally() -> Result<Vec<String>> {
     let output = tokio::process::Command::new("cargo")
-        .args(["nextest", "list", "--message-format", "json"])
+        .args(&args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .output()
         .await
-        .context("failed to run cargo nextest list")?;
+        .context("failed to run cargo test -- --list")?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("cargo nextest list failed:\n{stderr}");
+        anyhow::bail!("cargo test -- --list failed:\n{stderr}");
     }
 
-    let parsed: NextestListOutput =
-        serde_json::from_slice(&output.stdout).context("failed to parse nextest list JSON")?;
-
+    let stdout = String::from_utf8_lossy(&output.stdout);
     let mut tests = Vec::new();
-    for (_binary, suite) in &parsed.rust_suites {
-        for test_name in suite.testcases.keys() {
-            tests.push(test_name.clone());
+    for line in stdout.lines() {
+        // Lines look like: "tests::example_test1: test"
+        if let Some(name) = line.strip_suffix(": test") {
+            tests.push(name.to_string());
         }
     }
     tests.sort();
     Ok(tests)
 }
 
-/// Build a nextest `-E` filter expression for an exact set of tests.
-fn build_filter_expr(tests: &[String]) -> String {
-    tests
+/// Build the `-- --exact name1 name2 ...` arguments for `cargo test`.
+fn build_exact_args(tests: &[String]) -> String {
+    let names = tests
         .iter()
-        .map(|t| format!("test(={t})"))
+        .map(|t| shell_escape(t))
         .collect::<Vec<_>>()
-        .join(" | ")
+        .join(" ");
+    format!("--exact {names}")
+}
+
+/// Simple shell escaping: wrap in single quotes if needed.
+fn shell_escape(s: &str) -> String {
+    if s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == ':' || c == '-') {
+        s.to_string()
+    } else {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    }
 }
 
 // ── Main entry point ─────────────────────────────────────────────────
@@ -129,15 +132,15 @@ pub async fn run(
     release: bool,
     batch_size: usize,
     jobs_per_worker: usize,
-    nextest_args: &[String],
+    cargo_test_args: &[String],
 ) -> Result<()> {
     let ssh_key_path = PathBuf::from(shellexpand::tilde(ssh_key).as_ref());
 
     // 1. List tests locally
     info!("Enumerating tests locally...");
-    let tests = list_tests_locally().await?;
+    let tests = list_tests_locally(release).await?;
     if tests.is_empty() {
-        anyhow::bail!("No tests found by `cargo nextest list`");
+        anyhow::bail!("No tests found by `cargo test -- --list`");
     }
     let total_tests = tests.len();
     info!("Found {total_tests} test(s), max batch size {batch_size}");
@@ -241,11 +244,11 @@ pub async fn run(
 
     // 7. Adaptive work-stealing dispatch with concurrent slots per worker
     let pool = Arc::new(TestPool::new(tests, batch_size, n * jobs_per_worker));
-    let nextest_profile = if release { " --cargo-profile release" } else { "" };
-    let extra_args = if nextest_args.is_empty() {
+    let release_arg = if release { " --release" } else { "" };
+    let extra_args = if cargo_test_args.is_empty() {
         String::new()
     } else {
-        format!(" {}", nextest_args.join(" "))
+        format!(" {}", cargo_test_args.join(" "))
     };
 
     let start = Instant::now();
@@ -257,7 +260,7 @@ pub async fn run(
         let pool = Arc::clone(&pool);
         let total_bar = total_bar.clone();
         let extra_args = extra_args.clone();
-        let nextest_profile = nextest_profile.to_string();
+        let release_arg = release_arg.to_string();
         let session = Arc::clone(&sessions[i]);
         let semaphore = Arc::new(Semaphore::new(jobs_per_worker));
 
@@ -290,7 +293,7 @@ pub async fn run(
                 let active_slots = Arc::clone(&active_slots);
                 let pb = pb.clone();
                 let hostname = hostname.clone();
-                let nextest_profile = nextest_profile.clone();
+                let release_arg = release_arg.clone();
                 let extra_args = extra_args.clone();
 
                 active_slots.fetch_add(1, Ordering::Relaxed);
@@ -301,9 +304,9 @@ pub async fn run(
                 ));
 
                 slot_handles.push(tokio::spawn(async move {
-                    let filter_expr = build_filter_expr(&batch_tests);
+                    let exact_args = build_exact_args(&batch_tests);
                     let cmd = format!(
-                        "cd {REMOTE_WORK_DIR}/src && cargo nextest run{nextest_profile} -E '{filter_expr}'{extra_args}"
+                        "cd {REMOTE_WORK_DIR}/src && cargo test{release_arg}{extra_args} -- {exact_args}"
                     );
 
                     let mut output_buf = String::new();

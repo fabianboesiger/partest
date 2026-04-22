@@ -30,13 +30,13 @@ pub enum Command {
         #[arg(long, default_value_t = 32)]
         batch_size: usize,
 
-        /// Concurrent batch slots per worker (overlaps nextest overhead)
+        /// Concurrent batch slots per worker (overlaps startup overhead)
         #[arg(long, default_value_t = 4)]
         jobs_per_worker: usize,
 
-        /// Extra arguments forwarded to `cargo nextest run`
+        /// Extra arguments forwarded to `cargo test`
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        nextest_args: Vec<String>,
+        cargo_test_args: Vec<String>,
     },
 
     /// List discovered peers on the local network

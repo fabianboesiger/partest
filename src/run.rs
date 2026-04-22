@@ -59,8 +59,10 @@ pub async fn run(ssh_key: &str, release: bool, nextest_args: &[String]) -> Resul
         let partition_id = i + 1;
         let hostname = peer.hostname.clone();
         let cmd = format!(
-            "cd {REMOTE_WORK_DIR} && cargo nextest run --archive-file archive.tar.zst \
-             --workspace-remap {REMOTE_WORK_DIR}/src --partition hash:{partition_id}/{n}{extra_args}"
+            "cd {REMOTE_WORK_DIR}/src && cargo nextest run \
+             --archive-file {REMOTE_WORK_DIR}/archive.tar.zst \
+             --workspace-remap {REMOTE_WORK_DIR}/src \
+             --partition hash:{partition_id}/{n}{extra_args}"
         );
 
         handles.push(tokio::spawn(async move {
@@ -220,10 +222,11 @@ async fn distribute_all(
             .await
             .with_context(|| format!("failed to upload source to {name}"))?;
 
-        // Extract source on remote
+        // Clean old source, extract fresh
         session
             .exec_ignore(&format!(
-                "mkdir -p {REMOTE_WORK_DIR}/src && \
+                "rm -rf {REMOTE_WORK_DIR}/src && \
+                 mkdir -p {REMOTE_WORK_DIR}/src && \
                  cd {REMOTE_WORK_DIR}/src && \
                  tar xzf {REMOTE_WORK_DIR}/source.tar.gz"
             ))

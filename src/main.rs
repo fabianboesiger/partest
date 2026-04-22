@@ -26,9 +26,10 @@ async fn main() -> Result<()> {
             ssh_key,
             release,
             batch_size,
+            jobs_per_worker,
             nextest_args,
         } => {
-            run::run(&ssh_key, release, batch_size, &nextest_args).await?;
+            run::run(&ssh_key, release, batch_size, jobs_per_worker, &nextest_args).await?;
         }
         Command::Status => {
             status::show_status()?;

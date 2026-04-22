@@ -30,6 +30,10 @@ pub enum Command {
         #[arg(long, default_value_t = 32)]
         batch_size: usize,
 
+        /// Concurrent batch slots per worker (overlaps nextest overhead)
+        #[arg(long, default_value_t = 4)]
+        jobs_per_worker: usize,
+
         /// Extra arguments forwarded to `cargo nextest run`
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         nextest_args: Vec<String>,

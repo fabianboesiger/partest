@@ -31,7 +31,7 @@ pub enum Command {
         batch_size: usize,
 
         /// Concurrent batch slots per worker (overlaps startup overhead)
-        #[arg(long, default_value_t = 4)]
+        #[arg(long, default_value_t = 16)]
         jobs_per_worker: usize,
 
         /// Extra arguments forwarded to `cargo test`

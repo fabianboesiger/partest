@@ -70,6 +70,7 @@ cat > ~/Library/LaunchAgents/com.partest.daemon.plist << EOF
 EOF
 
 launchctl unload ~/Library/LaunchAgents/com.partest.daemon.plist 2>/dev/null || true
+sleep 1
 launchctl load ~/Library/LaunchAgents/com.partest.daemon.plist
 
 echo ""

@@ -54,7 +54,12 @@ pub fn discover_peers(timeout: Duration) -> Result<Vec<Peer>> {
                     .unwrap_or("root")
                     .to_string();
 
-                if let Some(&ip) = info.get_addresses().iter().next() {
+                if let Some(&ip) = info
+                    .get_addresses()
+                    .iter()
+                    .find(|a| a.is_ipv4())
+                    .or_else(|| info.get_addresses().iter().next())
+                {
                     peers.push(Peer {
                         hostname,
                         ip,
@@ -73,9 +78,9 @@ pub fn discover_peers(timeout: Duration) -> Result<Vec<Peer>> {
         }
     }
 
-    // Deduplicate by IP
-    peers.sort_by_key(|p| p.ip.to_string());
-    peers.dedup_by_key(|p| p.ip.to_string());
+    // Deduplicate by hostname (prefer first-seen / IPv4 entry)
+    peers.sort_by(|a, b| a.hostname.cmp(&b.hostname));
+    peers.dedup_by(|a, b| a.hostname == b.hostname);
 
     let _ = mdns.stop_browse(SERVICE_TYPE);
     let _ = mdns.shutdown();

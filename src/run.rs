@@ -59,9 +59,9 @@ async fn list_tests_locally() -> Result<Vec<String>> {
         serde_json::from_slice(&output.stdout).context("failed to parse nextest list JSON")?;
 
     let mut tests = Vec::new();
-    for (binary, suite) in &parsed.rust_suites {
+    for (_binary, suite) in &parsed.rust_suites {
         for test_name in suite.testcases.keys() {
-            tests.push(format!("{binary}::{test_name}"));
+            tests.push(test_name.clone());
         }
     }
     tests.sort();
@@ -86,11 +86,7 @@ fn create_batches(tests: Vec<String>, batch_size: usize) -> VecDeque<Batch> {
 fn build_filter_expr(tests: &[String]) -> String {
     tests
         .iter()
-        .map(|t| {
-            // Extract just the test name (after ::) for the filter
-            let name = t.rsplit("::").next().unwrap_or(t);
-            format!("test(={name})")
-        })
+        .map(|t| format!("test(={t})"))
         .collect::<Vec<_>>()
         .join(" | ")
 }

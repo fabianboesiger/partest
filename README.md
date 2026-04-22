@@ -110,6 +110,127 @@ partest daemon
 
 This advertises the machine on the local network via mDNS. Keep it running in a terminal.
 
+### Run the daemon as a background service
+
+Instead of keeping a terminal open, you can install the daemon as a system service that starts automatically on boot.
+
+#### macOS (launchd)
+
+Create a plist file:
+
+```bash
+cat > ~/Library/LaunchAgents/com.partest.daemon.plist << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.partest.daemon</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>sh</string>
+        <string>-lc</string>
+        <string>$HOME/.cargo/bin/partest daemon</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/partest.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/partest.log</string>
+</dict>
+</plist>
+EOF
+```
+
+Load and start it:
+
+```bash
+launchctl load ~/Library/LaunchAgents/com.partest.daemon.plist
+```
+
+To stop and remove:
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.partest.daemon.plist
+```
+
+#### Linux (systemd)
+
+Create a user service file:
+
+```bash
+mkdir -p ~/.config/systemd/user
+
+cat > ~/.config/systemd/user/partest.service << 'EOF'
+[Unit]
+Description=partest daemon
+After=network.target
+
+[Service]
+ExecStart=%h/.cargo/bin/partest daemon
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+EOF
+```
+
+Enable and start:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now partest
+```
+
+To check status or stop:
+
+```bash
+systemctl --user status partest
+systemctl --user stop partest
+```
+
+To persist the service across reboots (even when not logged in):
+
+```bash
+sudo loginctl enable-linger $USER
+```
+
+#### Windows (Task Scheduler)
+
+Open PowerShell as your user and run:
+
+```powershell
+$action = New-ScheduledTaskAction `
+    -Execute "$env:USERPROFILE\.cargo\bin\partest.exe" `
+    -Argument "daemon"
+$trigger = New-ScheduledTaskTrigger -AtLogOn
+$settings = New-ScheduledTaskSettingsSet `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
+    -ExecutionTimeLimit 0 `
+    -RestartCount 3 `
+    -RestartInterval (New-TimeSpan -Minutes 1)
+Register-ScheduledTask -TaskName "partest" `
+    -Action $action -Trigger $trigger -Settings $settings
+```
+
+Start it immediately:
+
+```powershell
+Start-ScheduledTask -TaskName "partest"
+```
+
+To stop and remove:
+
+```powershell
+Stop-ScheduledTask -TaskName "partest"
+Unregister-ScheduledTask -TaskName "partest" -Confirm:$false
+```
+
 ### Run tests
 
 From any Rust project directory:

@@ -235,24 +235,28 @@ pub async fn run(
             // We need to borrow session across an await, so use a reference via index
             let session_ref = session;
             build_handles.push(async move {
-                let result = session_ref.exec_stream(&cmd, |_line| {}).await;
-                (i, hostname, result)
+                let mut build_output = String::new();
+                let result = session_ref.exec_stream(&cmd, |line| {
+                    build_output.push_str(line);
+                    build_output.push('\n');
+                }).await;
+                (i, hostname, result, build_output)
             });
         }
 
         let results = futures::future::join_all(build_handles).await;
-        for (i, hostname, result) in results {
+        for (i, hostname, result, build_output) in results {
             match result {
                 Ok(0) => {
                     bars[i].set_message(format!("{hostname}  — ✓ build complete"));
                 }
                 Ok(code) => {
                     bars[i].finish_with_message(format!("{hostname}  — ✗ build failed (exit {code})"));
-                    anyhow::bail!("Pre-build failed on {hostname} with exit code {code}");
+                    anyhow::bail!("Pre-build failed on {hostname} with exit code {code}:\n{build_output}");
                 }
                 Err(e) => {
                     bars[i].finish_with_message(format!("{hostname}  — ✗ build error"));
-                    anyhow::bail!("Pre-build failed on {hostname}: {e}");
+                    anyhow::bail!("Pre-build failed on {hostname}: {e:#}\n{build_output}");
                 }
             }
         }
@@ -333,6 +337,12 @@ pub async fn run(
                         output_buf.push('\n');
                     }).await;
 
+                    // If the SSH command itself failed, append the error to output
+                    // so the dispatcher can see what went wrong.
+                    if let Err(ref e) = exit_code {
+                        output_buf.push_str(&format!("\n[partest] SSH execution error: {e:#}\n"));
+                    }
+
                     let elapsed = batch_start.elapsed();
                     let prev_tests = tests_run.fetch_add(batch_len, Ordering::Relaxed);
                     let _prev_batches = batches_run.fetch_add(1, Ordering::Relaxed);
@@ -389,7 +399,7 @@ pub async fn run(
     println!("─── Summary ───");
 
     let mut any_failed = false;
-    let mut failed_outputs: Vec<(String, usize, String)> = Vec::new();
+    let mut failed_outputs: Vec<(String, usize, Result<u32>, String)> = Vec::new();
 
     for (hostname, results, tests_run) in &worker_results {
         let passed = results.iter().filter(|r| matches!(&r.exit_code, Ok(0))).count();
@@ -406,7 +416,11 @@ pub async fn run(
             );
             for r in results {
                 if !matches!(&r.exit_code, Ok(0)) {
-                    failed_outputs.push((hostname.clone(), r.batch_index, r.output.clone()));
+                    let code = match &r.exit_code {
+                        Ok(c) => Ok(*c),
+                        Err(e) => Err(anyhow::anyhow!("{e:#}")),
+                    };
+                    failed_outputs.push((hostname.clone(), r.batch_index, code, r.output.clone()));
                 }
             }
         } else {
@@ -429,9 +443,13 @@ pub async fn run(
     if !failed_outputs.is_empty() {
         println!();
         println!("─── Failure Details ───");
-        for (hostname, batch_idx, output) in &failed_outputs {
+        for (hostname, batch_idx, exit_code, output) in &failed_outputs {
             println!();
-            println!("── [{hostname}] batch {batch_idx} ──");
+            let status = match exit_code {
+                Ok(code) => format!("exit code {code}"),
+                Err(e) => format!("error: {e:#}"),
+            };
+            println!("── [{hostname}] batch {batch_idx} ({status}) ──");
             println!("{output}");
         }
     }
